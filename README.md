@@ -5,3 +5,8 @@ Users who want to participate have to write !register in the channel "Orakel". U
 
 ## Configuration
 The properties files in the src/main/resources folders have to be configured with real database and teamspeak query connections
+
+## Recorded events
+- User join (with timestamp, to which channel)
+- User disconnect (with timestamp)
+- Client movec (with timestamp, who was moved, who moved)
