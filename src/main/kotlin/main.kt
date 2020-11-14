@@ -58,8 +58,9 @@ fun main() {
     ChannelProperty.CHANNEL_DESCRIPTION to "Werde erleuchtet mit durchdringendem Wissen"))
 
     api.addTS3Listeners(Listener(api))
-    api.registerEvent(TS3EventType.TEXT_CHANNEL, channelId)
-    api.registerEvent(TS3EventType.SERVER)
+//    api.registerEvent(TS3EventType.TEXT_CHANNEL, channelId)
+//    api.registerEvent(TS3EventType.SERVER)
+    api.registerAllEvents()
 }
 
 fun <T:Any> String.execAndMap(transform : (ResultSet) -> T) : List<T> {
@@ -101,34 +102,50 @@ fun getOrCreateUser(uniqueUserId: String): User {
     } ?: throw Exception("User not found in database after creation.")
 }
 
-fun registerUser(uniqueUserId: String) {
+fun registerUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()) {
     transaction{
-    val user = getOrCreateUser(uniqueUserId)
-        user.hasAgreed = true
-        UserRegistration.new() {
-            this.timestamp = LocalDateTime.now()
-            this.action = 1
-            this.user = user
+        val user = getOrCreateUser(uniqueUserId)
+        if (!user.hasAgreed){
+            user.hasAgreed = true
+            UserRegistration.new() {
+                this.timestamp = timestamp
+                this.action = 1
+                this.user = user
+            }
         }
     }
 }
 
-fun unregisterUser(invokerUniqueId: String) {
+fun unregisterUser(invokerUniqueId: String, timestamp: LocalDateTime = LocalDateTime.now()) {
     val user = getOrCreateUser(invokerUniqueId)
     transaction {
-        user.hasAgreed = false
-        UserRegistration.new() {
-            this.timestamp = LocalDateTime.now()
-            this.action = 0
-            this.user = user
+//        addLogger(StdOutSqlLogger)
+        if (user.hasAgreed){
+            user.hasAgreed = false
+            UserRegistration.new() {
+                this.timestamp = timestamp
+                this.action = 0
+                this.user = user
+            }
         }
     }
 }
+fun lastUsedClientId(userId: Int): String? {
+    return transaction {
+//        addLogger(StdOutSqlLogger)
+        RecordedEvents.slice(RecordedEvents.invoker)
+            .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.obj1 eq userId) }
+            .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
+            .map { it[RecordedEvents.invoker] }.firstOrNull()?.value
+    }
+}
 
-fun registerEvent(invokerId: String?, receiverId: String?, objId: Int?, eventType: Int) {
+
+fun registerEvent(eventType: Int, invokerId: String?, receiverId: String?=null, obj1: Int? = null, obj2: Int? = null, timestamp: LocalDateTime = LocalDateTime.now()) {
     transaction {
-        val invoker = if (invokerId != null) User[invokerId] else null
-        val receiver = if (receiverId != null) User[receiverId] else null
+        addLogger(StdOutSqlLogger)
+        val invoker = if (invokerId != null && invokerId != "") User[invokerId] else null
+        val receiver = if (receiverId != null && receiverId != "") User[receiverId] else null
 
         val invokerAgree = (invoker != null && invoker.hasAgreed)
         val receiverAgree = (receiver != null && receiver.hasAgreed)
@@ -136,10 +153,11 @@ fun registerEvent(invokerId: String?, receiverId: String?, objId: Int?, eventTyp
         if (invokerAgree || receiverAgree){
             RecordedEvent.new {
                 this.invoker = if (invokerAgree) invoker else null
-                this.target = if (receiverAgree) invoker else null
-                this.obj1 = objId
+                this.target = if (receiverAgree) receiver else null
+                this.obj1 = obj1
+                this.obj2 = obj2
                 this.eventType = eventType
-                this.timestamp = LocalDateTime.now()
+                this.timestamp = timestamp
             }
         }
 
@@ -152,31 +170,25 @@ class Listener(val api: TS3Api) : TS3Listener {
             println("Text message event was null")
             return
         }
+        val timestamp = LocalDateTime.now()
         val message = e.message
         if (message == "!register"){
             try {
-                registerUser(e.invokerUniqueId)
+                registerUser(e.invokerUniqueId, timestamp=timestamp)
+                registerEvent(1, e.invokerUniqueId, null, obj1=e.invokerId, timestamp = timestamp)
                 api.sendChannelMessage("Erfolgreich registriert!")
             }catch (e: Exception){
                 println(e.message)
             }
         } else if (message == "!unregister"){
             try {
-                unregisterUser(e.invokerUniqueId)
+                registerEvent(2, e.invokerUniqueId, null, obj1=e.invokerId, timestamp = timestamp)
+                unregisterUser(e.invokerUniqueId, timestamp=timestamp)
                 api.sendChannelMessage("Erfolgreich abgemeldet!")
             }catch (e: Exception){
                 println(e.message)
 
             }
-        }
-    }
-
-    fun lastJoinedEvent(userId: Int): String? {
-        return transaction {
-             RecordedEvents.slice(RecordedEvents.invoker)
-                 .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.obj1 eq userId) }
-                .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
-                 .map { it[RecordedEvents.invoker] }.firstOrNull()?.value
         }
     }
 
@@ -188,7 +200,8 @@ class Listener(val api: TS3Api) : TS3Listener {
         }
         val clientUnique = e.uniqueClientIdentifier
         val clientId = e.clientId
-        registerEvent(clientUnique, null, clientId, 1)
+        val channelId = e.clientTargetId
+        registerEvent(1, clientUnique, null, obj1=clientId, obj2=channelId)
 
     }
 
@@ -200,8 +213,8 @@ class Listener(val api: TS3Api) : TS3Listener {
         }
         try{
             val clientId = e.clientId
-            val uniqueId = lastJoinedEvent(clientId)
-            registerEvent(uniqueId, null, e.clientId, 2)
+            val uniqueId = lastUsedClientId(clientId)
+            registerEvent(2, uniqueId, null, obj1=clientId)
             println("Event was tried to register")
         }catch (e: Exception){
             println("Client info could not be retrieved")
@@ -210,39 +223,52 @@ class Listener(val api: TS3Api) : TS3Listener {
     }
 
     override fun onServerEdit(e: ServerEditedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onChannelEdit(e: ChannelEditedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onChannelDescriptionChanged(e: ChannelDescriptionEditedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onClientMoved(e: ClientMovedEvent?) {
-        print("Client moved!")
+        println("Client moved!")
+        if (e == null){
+            println("ClientMoved event was null")
+            return
+        }
+        try {
+            val clientId = lastUsedClientId(e.clientId)
+            val invokerId = e.invokerUniqueId
+            val channelId = e.targetChannelId
+            println("InvokerUnique = ${invokerId}, ClientUnique = ${clientId}, NewChannelId = ${channelId}")
+            registerEvent(3, invokerId, clientId, obj1=channelId)
+        } catch (e: Exception) {
+            println(e.message)
+        }
     }
 
     override fun onChannelCreate(e: ChannelCreateEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onChannelDeleted(e: ChannelDeletedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onChannelMoved(e: ChannelMovedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onChannelPasswordChanged(e: ChannelPasswordChangedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
     override fun onPrivilegeKeyUsed(e: PrivilegeKeyUsedEvent?) {
-        TODO("Not yet implemented")
+//        TODO("Not yet implemented")
     }
 
 }
