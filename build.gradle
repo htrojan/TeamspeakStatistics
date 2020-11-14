@@ -1,0 +1,31 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version '1.4.10'
+}
+
+group 'de.blackcatunion'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+    jcenter()
+}
+
+dependencies {
+//    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+    implementation 'com.natpryce:konfig:1.6.10.0'
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
+    implementation group: 'com.github.theholywaffle', name: 'teamspeak3-api', version: '1.2.0'
+    implementation "org.jetbrains.exposed:exposed-core:$exposed_version"
+    implementation "org.jetbrains.exposed:exposed-dao:$exposed_version"
+    implementation "org.jetbrains.exposed:exposed-jdbc:$exposed_version"
+    implementation 'org.postgresql:postgresql:42.2.18'
+    implementation "org.jetbrains.exposed:exposed-java-time:$exposed_version"
+}
+
+compileKotlin {
+    kotlinOptions.jvmTarget = "14"
+}
+compileTestKotlin {
+    kotlinOptions.jvmTarget = "14"
+}
