@@ -9,4 +9,11 @@ The properties files in the src/main/resources folders have to be configured wit
 ## Recorded events
 - User join (with timestamp, to which channel)
 - User disconnect (with timestamp)
-- Client movec (with timestamp, who was moved, who moved)
+- Client moved (with timestamp, who was moved, who moved)
+
+## Goal
+- Cool data points for every user participating :-)
+- Which channel was used the most?
+- What daytimes had the most 'combined user hours'?
+- Who used the afk channel?
+- More ideas will come
