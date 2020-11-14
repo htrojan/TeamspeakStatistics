@@ -2,24 +2,17 @@ import com.github.theholywaffle.teamspeak3.TS3Api
 import com.github.theholywaffle.teamspeak3.TS3Config
 import com.github.theholywaffle.teamspeak3.TS3Query
 import com.github.theholywaffle.teamspeak3.api.ChannelProperty
-import com.github.theholywaffle.teamspeak3.api.TextMessageTargetMode
 import com.github.theholywaffle.teamspeak3.api.event.*
-import com.github.theholywaffle.teamspeak3.api.exception.TS3CommandFailedException
 import com.natpryce.konfig.ConfigurationProperties
 import com.natpryce.konfig.Key
-import com.natpryce.konfig.overriding
 import com.natpryce.konfig.stringType
-import org.jetbrains.exposed.dao.IntEntity
-import org.jetbrains.exposed.dao.IntEntityClass
-import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.statements.InsertStatement
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.io.File
 import java.lang.Exception
+import java.sql.ResultSet
 import java.time.LocalDateTime
-import javax.management.Query.eq
-import kotlin.concurrent.thread
 
 val teamspeak_host = Key("teamspeak.host", stringType)
 val teamspeak_user = Key("teamspeak.user", stringType)
@@ -51,9 +44,7 @@ fun initDatabase() {
         "jdbc:postgresql://${dbconfig[database_host]}:${dbconfig[database_port]}/${dbconfig[database_name]}",
         user = dbconfig[database_user], password = dbconfig[database_password])
     transaction {
-        addLogger(StdOutSqlLogger)
-        SchemaUtils.create(Users, UserRegistrations)
-        println("${User.all()}")
+        SchemaUtils.create(Users, UserRegistrations, RecordedEvents)
     }
 }
 
@@ -68,28 +59,51 @@ fun main() {
 
     api.addTS3Listeners(Listener(api))
     api.registerEvent(TS3EventType.TEXT_CHANNEL, channelId)
+    api.registerEvent(TS3EventType.SERVER)
+}
+
+fun <T:Any> String.execAndMap(transform : (ResultSet) -> T) : List<T> {
+    val result = arrayListOf<T>()
+    TransactionManager.current().exec(this) { rs ->
+        while (rs.next()) {
+            result += transform(rs)
+        }
+    }
+    return result
+}
+
+fun <T : Table> T.insertOrIgnore(vararg keys: Column<*>, body: T.(InsertStatement<Number>) -> Unit) =
+    InsertOrIgnore<Number>(this, keys = *keys).apply {
+        body(this)
+        execute(TransactionManager.current())
+    }
+
+class InsertOrIgnore<Key : Any>(
+    table: Table,
+    isIgnore: Boolean = false,
+    private vararg val keys: Column<*>
+) : InsertStatement<Key>(table, isIgnore) {
+    override fun prepareSQL(transaction: Transaction): String {
+        val tm = TransactionManager.current()
+        val onConflict = "ON CONFLICT ${keys.joinToString { tm.identity(it) }} DO NOTHING"
+        return "${super.prepareSQL(transaction)} $onConflict"
+    }
 }
 
 fun getOrCreateUser(uniqueUserId: String): User {
-    var user = transaction {
-        addLogger(StdOutSqlLogger)
-        User.findById(uniqueUserId)
-    }
-    println("user = $user")
-    if (user == null) {
-        print("Registering user in database")
-        user = transaction {
-            User.new(uniqueUserId) {
-                hasAgreed = true
-            }
+    return transaction {
+//        "insert into users (has_agreed, unique_id) VALUES (FALSE, '${uniqueUserId}') ON CONFLICT DO NOTHING".execAndMap {}
+        Users.insertOrIgnore{
+            it[uniqueId] = uniqueUserId
+            it[hasAgreed] = false
         }
-    }
-    return user
+        User.findById(uniqueUserId)
+    } ?: throw Exception("User not found in database after creation.")
 }
 
 fun registerUser(uniqueUserId: String) {
+    transaction{
     val user = getOrCreateUser(uniqueUserId)
-    transaction {
         user.hasAgreed = true
         UserRegistration.new() {
             this.timestamp = LocalDateTime.now()
@@ -108,6 +122,27 @@ fun unregisterUser(invokerUniqueId: String) {
             this.action = 0
             this.user = user
         }
+    }
+}
+
+fun registerEvent(invokerId: String?, receiverId: String?, objId: Int?, eventType: Int) {
+    transaction {
+        val invoker = if (invokerId != null) User[invokerId] else null
+        val receiver = if (receiverId != null) User[receiverId] else null
+
+        val invokerAgree = (invoker != null && invoker.hasAgreed)
+        val receiverAgree = (receiver != null && receiver.hasAgreed)
+
+        if (invokerAgree || receiverAgree){
+            RecordedEvent.new {
+                this.invoker = if (invokerAgree) invoker else null
+                this.target = if (receiverAgree) invoker else null
+                this.obj1 = objId
+                this.eventType = eventType
+                this.timestamp = LocalDateTime.now()
+            }
+        }
+
     }
 }
 class Listener(val api: TS3Api) : TS3Listener {
@@ -136,13 +171,42 @@ class Listener(val api: TS3Api) : TS3Listener {
         }
     }
 
+    fun lastJoinedEvent(userId: Int): String? {
+        return transaction {
+             RecordedEvents.slice(RecordedEvents.invoker)
+                 .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.obj1 eq userId) }
+                .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
+                 .map { it[RecordedEvents.invoker] }.firstOrNull()?.value
+        }
+    }
 
     override fun onClientJoin(e: ClientJoinEvent?) {
-        TODO("Not yet implemented")
+        println("Join was detected")
+        if (e == null){
+            println("Join event was null")
+            return
+        }
+        val clientUnique = e.uniqueClientIdentifier
+        val clientId = e.clientId
+        registerEvent(clientUnique, null, clientId, 1)
+
     }
 
     override fun onClientLeave(e: ClientLeaveEvent?) {
-        TODO("Not yet implemented")
+        println("Leave was detected")
+        if (e == null){
+            println("Leave event was null")
+            return
+        }
+        try{
+            val clientId = e.clientId
+            val uniqueId = lastJoinedEvent(clientId)
+            registerEvent(uniqueId, null, e.clientId, 2)
+            println("Event was tried to register")
+        }catch (e: Exception){
+            println("Client info could not be retrieved")
+            println(e.message)
+        }
     }
 
     override fun onServerEdit(e: ServerEditedEvent?) {
