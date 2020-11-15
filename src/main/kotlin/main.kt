@@ -7,6 +7,7 @@ import com.natpryce.konfig.ConfigurationProperties
 import com.natpryce.konfig.Key
 import com.natpryce.konfig.overriding
 import com.natpryce.konfig.stringType
+import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.statements.InsertStatement
 import org.jetbrains.exposed.sql.transactions.TransactionManager
@@ -59,10 +60,16 @@ fun main() {
             ConfigurationProperties.fromResource("query.properties")
 
     val api = connectApi(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
+    val ownId = api.whoAmI().id
     val channel = api.getChannelByNameExact(config[channel_name], false)
-    val t = channel?.id
+    val channelId : Int = channel?.id
         ?: api.createChannel(config[channel_name], mapOf(ChannelProperty.CHANNEL_ORDER to "0",
             ChannelProperty.CHANNEL_DESCRIPTION to config[channel_description]))
+    try {
+        api.moveClient(ownId, channelId)
+    }catch (e: Exception){
+        println("Movint of client failed")
+    }
 
     api.addTS3Listeners(Listener(api))
     api.registerAllEvents()
@@ -96,76 +103,81 @@ class InsertOrIgnore<Key : Any>(
     }
 }
 
-fun getOrCreateUser(uniqueUserId: String): User {
+/**
+ * @return the UserId created in the database
+ */
+fun getOrCreateUser(uniqueUserId: String){
     return transaction {
-//        "insert into users (has_agreed, unique_id) VALUES (FALSE, '${uniqueUserId}') ON CONFLICT DO NOTHING".execAndMap {}
         Users.insertOrIgnore{
             it[uniqueId] = uniqueUserId
             it[hasAgreed] = false
         }
-        User.findById(uniqueUserId)
-    } ?: throw Exception("User not found in database after creation.")
-}
-
-fun registerUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()) {
-    transaction{
-        val user = getOrCreateUser(uniqueUserId)
-        if (!user.hasAgreed){
-            user.hasAgreed = true
-            UserRegistration.new() {
-                this.timestamp = timestamp
-                this.action = 1
-                this.user = user
-            }
-        }
     }
 }
 
-fun unregisterUser(invokerUniqueId: String, timestamp: LocalDateTime = LocalDateTime.now()) {
-    val user = getOrCreateUser(invokerUniqueId)
-    transaction {
-//        addLogger(StdOutSqlLogger)
-        if (user.hasAgreed){
-            user.hasAgreed = false
-            UserRegistration.new() {
-                this.timestamp = timestamp
-                this.action = 0
-                this.user = user
-            }
-        }
-    }
-}
-fun lastUsedClientId(userId: Int): String? {
+fun registerUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int>? {
     return transaction {
-//        addLogger(StdOutSqlLogger)
-        RecordedEvents.slice(RecordedEvents.invoker)
-            .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.obj1 eq userId) }
-            .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
-            .map { it[RecordedEvents.invoker] }.firstOrNull()?.value
+        addLogger(StdOutSqlLogger)
+            getOrCreateUser(uniqueUserId)
+            val userQuery = Users.slice(Users.id).select{(Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq false)}
+            val userId = userQuery.map { it[Users.id] }.firstOrNull()
+        if (userId != null){
+            UserRegistrations.insert() {
+                it[action] = 0
+                it[UserRegistrations.timestamp] = timestamp
+                it[user] =userId
+            }
+            Users.update({Users.id eq userId}) { it[hasAgreed] = true }
+        }
+        userId
     }
 }
 
-
-fun registerEvent(eventType: Int, invokerId: String?, receiverId: String?=null, obj1: Int? = null, obj2: Int? = null, timestamp: LocalDateTime = LocalDateTime.now()) {
+fun unregisterUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()) {
     transaction {
         addLogger(StdOutSqlLogger)
-        val invoker = if (invokerId != null && invokerId != "") User[invokerId] else null
-        val receiver = if (receiverId != null && receiverId != "") User[receiverId] else null
+        getOrCreateUser(uniqueUserId)
+        val userQuery = Users.slice(Users.id).select{(Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq true)}
 
-        val invokerAgree = (invoker != null && invoker.hasAgreed)
-        val receiverAgree = (receiver != null && receiver.hasAgreed)
-
-        if (invokerAgree || receiverAgree){
-            RecordedEvent.new {
-                this.invoker = if (invokerAgree) invoker else null
-                this.target = if (receiverAgree) receiver else null
-                this.obj1 = obj1
-                this.obj2 = obj2
-                this.eventType = eventType
-                this.timestamp = timestamp
-            }
+        UserRegistrations.insert() {
+            it[action] = 0
+            it[UserRegistrations.timestamp] = timestamp
+            it[user] = userQuery.map { it[Users.id] }.first()
         }
+        Users.update({Users.uniqueId eq uniqueUserId }) { it[Users.hasAgreed] = true }
+    }
+}
+fun lastUsedClientId(userId: Int): Int? {
+    return transaction {
+        addLogger(StdOutSqlLogger)
+        RecordedEvents.slice(RecordedEvents.invokerId)
+            .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.clientId eq userId) }
+            .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
+            .map { it[RecordedEvents.invokerId] }.firstOrNull()?.value
+    }
+}
 
+
+private fun uniqueUserToEntityId(uniqueUserId: String?, agreedCondition: Boolean =true): EntityID<Int>? {
+    return if (uniqueUserId != null && uniqueUserId != "") Users.select{(Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq true)}.
+     map { it[Users.id] }.firstOrNull() else null
+}
+
+private fun userIdToEntityId(userId: Int?, agreedCondition: Boolean=true): EntityID<Int>? {
+    return if (userId != null) Users.select{(Users.id eq userId) and (Users.hasAgreed eq true)}.
+    map{it[Users.id]}.firstOrNull() else null
+}
+
+private fun registerEvent(eventType: Int, invoker: EntityID<Int>?=null, receiver: EntityID<Int>?=null, channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
+    if (invoker != null || receiver != null){
+        RecordedEvents.insert {
+            it[RecordedEvents.clientId] = clientId
+            it[RecordedEvents.channelId] = channelId
+            it[RecordedEvents.targetId] = receiver
+            it[RecordedEvents.invokerId] = invoker
+            it[RecordedEvents.eventType] = eventType
+            it[RecordedEvents.timestamp] = timestamp
+        }
     }
 }
 class Listener(val api: TS3Api) : TS3Listener {
@@ -179,16 +191,21 @@ class Listener(val api: TS3Api) : TS3Listener {
         val message = e.message
         if (message == "!register"){
             try {
-                registerUser(e.invokerUniqueId, timestamp=timestamp)
-                registerEvent(1, e.invokerUniqueId, null, obj1=e.invokerId, timestamp = timestamp)
+                transaction {
+                    val id = registerUser(e.invokerUniqueId, timestamp=timestamp)
+                    if (id != null)
+                        registerEvent(1, invoker=uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
+                }
                 api.sendChannelMessage("Erfolgreich registriert!")
             }catch (e: Exception){
                 println(e.message)
             }
         } else if (message == "!unregister"){
             try {
-                registerEvent(2, e.invokerUniqueId, null, obj1=e.invokerId, timestamp = timestamp)
-                unregisterUser(e.invokerUniqueId, timestamp=timestamp)
+                transaction {
+                    registerEvent(2, invoker=uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
+                    unregisterUser(e.invokerUniqueId, timestamp=timestamp)
+                }
                 api.sendChannelMessage("Erfolgreich abgemeldet!")
             }catch (e: Exception){
                 println(e.message)
@@ -206,7 +223,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         val clientUnique = e.uniqueClientIdentifier
         val clientId = e.clientId
         val channelId = e.clientTargetId
-        registerEvent(1, clientUnique, null, obj1=clientId, obj2=channelId)
+        registerEvent(1, receiver = uniqueUserToEntityId(clientUnique), clientId=clientId, channelId=channelId)
 
     }
 
@@ -218,8 +235,8 @@ class Listener(val api: TS3Api) : TS3Listener {
         }
         try{
             val clientId = e.clientId
-            val uniqueId = lastUsedClientId(clientId)
-            registerEvent(2, uniqueId, null, obj1=clientId)
+            val userId = lastUsedClientId(clientId)
+            registerEvent(2, receiver = userIdToEntityId(userId), clientId=clientId)
             println("Event was tried to register")
         }catch (e: Exception){
             println("Client info could not be retrieved")
@@ -250,7 +267,7 @@ class Listener(val api: TS3Api) : TS3Listener {
             val invokerId = e.invokerUniqueId
             val channelId = e.targetChannelId
             println("InvokerUnique = ${invokerId}, ClientUnique = ${clientId}, NewChannelId = ${channelId}")
-            registerEvent(3, invokerId, clientId, obj1=channelId)
+            registerEvent(3,invoker = uniqueUserToEntityId(invokerId), receiver =  userIdToEntityId(clientId), channelId=channelId)
         } catch (e: Exception) {
             println(e.message)
         }

@@ -1,24 +1,17 @@
-import org.jetbrains.exposed.dao.Entity
-import org.jetbrains.exposed.dao.EntityClass
 import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.dao.id.IntIdTable
-import org.jetbrains.exposed.sql.Column
-import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.`java-time`.datetime
-import org.jetbrains.exposed.sql.`java-time`.timestamp
 
-object Users : IdTable<String>() {
+object Users : IntIdTable() {
     val uniqueId = varchar("unique_id", 50).uniqueIndex()
     val hasAgreed = bool("has_agreed")
-    override val id : Column<EntityID<String>> = uniqueId.entityId()
 }
 
-class User(id: EntityID<String>) : Entity<String>(id) {
-    companion object : EntityClass<String, User>(Users)
-    var uniqueId by Users.uniqueId
+class User(id: EntityID<Int>) : IntEntity(id) {
+    companion object : IntEntityClass<User>(Users)
+    var userUniqueId by Users.uniqueId
     var hasAgreed by Users.hasAgreed
 }
 
@@ -38,10 +31,10 @@ class UserRegistration(id: EntityID<Int>) : IntEntity(id) {
 
 object RecordedEvents : IntIdTable() {
     val eventType = integer("event_type")
-    val invoker = reference("invoker", Users).nullable()
-    val target = reference("target", Users).nullable()
-    val obj1 = integer("obj1").nullable()
-    val obj2 = integer("obj2").nullable()
+    val invokerId = reference("invoker_id", Users).nullable()
+    val targetId = reference("target_id", Users).nullable()
+    val clientId = integer("client_id").nullable()
+    val channelId = integer("channel_id").nullable()
     val timestamp = datetime("timestamp")
 }
 
@@ -49,9 +42,9 @@ class RecordedEvent(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<RecordedEvent>(RecordedEvents)
 
     var eventType by RecordedEvents.eventType
-    var invoker by User optionalReferencedOn RecordedEvents.invoker
-    var target by User optionalReferencedOn RecordedEvents.target
-    var obj1 by RecordedEvents.obj1
-    var obj2 by RecordedEvents.obj2
+    var invoker by User optionalReferencedOn RecordedEvents.invokerId
+    var target by User optionalReferencedOn RecordedEvents.targetId
+    var clientId by RecordedEvents.clientId
+    var channelId by RecordedEvents.channelId
     var timestamp by RecordedEvents.timestamp
 }
