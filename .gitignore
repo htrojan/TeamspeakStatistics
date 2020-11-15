@@ -1,4 +1,5 @@
 /src/main/resources/database.properties
+/src/main/resources/database_stage.properties
 /src/main/resources/teamspeak.properties
 
 .gradle

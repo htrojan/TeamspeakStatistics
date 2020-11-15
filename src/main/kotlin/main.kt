@@ -5,6 +5,7 @@ import com.github.theholywaffle.teamspeak3.api.ChannelProperty
 import com.github.theholywaffle.teamspeak3.api.event.*
 import com.natpryce.konfig.ConfigurationProperties
 import com.natpryce.konfig.Key
+import com.natpryce.konfig.overriding
 import com.natpryce.konfig.stringType
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.statements.InsertStatement
@@ -24,6 +25,8 @@ val database_user = Key("database.user", stringType)
 val database_password = Key("database.password", stringType)
 val database_name = Key("database.name", stringType)
 
+val channel_name = Key("channel.name", stringType)
+val channel_description = Key("channel.description", stringType)
 
 fun connectApi(host: String, user: String, password: String): TS3Api {
     val tsconfig: TS3Config = TS3Config()
@@ -39,7 +42,7 @@ fun connectApi(host: String, user: String, password: String): TS3Api {
 }
 
 fun initDatabase() {
-    val dbconfig = ConfigurationProperties.fromResource("database.properties")
+    val dbconfig = ConfigurationProperties.fromResource("database_stage.properties")
     Database.connect(
         "jdbc:postgresql://${dbconfig[database_host]}:${dbconfig[database_port]}/${dbconfig[database_name]}",
         user = dbconfig[database_user], password = dbconfig[database_password])
@@ -51,15 +54,17 @@ fun initDatabase() {
 fun main() {
     print("Starting")
     initDatabase()
-    val tsconfig = ConfigurationProperties.fromResource("teamspeak.properties")
-    val api = connectApi(tsconfig[teamspeak_host], tsconfig[teamspeak_user], tsconfig[teamspeak_password])
+    val config = ConfigurationProperties.fromResource("teamspeak.properties") overriding
+            ConfigurationProperties.fromResource("database_stage.properties") overriding
+            ConfigurationProperties.fromResource("query.properties")
 
-    val channelId = api.createChannel("Orakelkanal - Live", mapOf(ChannelProperty.CHANNEL_ORDER to "0",
-    ChannelProperty.CHANNEL_DESCRIPTION to "Werde erleuchtet mit durchdringendem Wissen"))
+    val api = connectApi(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
+    val channel = api.getChannelByNameExact(config[channel_name], false)
+    val t = channel?.id
+        ?: api.createChannel(config[channel_name], mapOf(ChannelProperty.CHANNEL_ORDER to "0",
+            ChannelProperty.CHANNEL_DESCRIPTION to config[channel_description]))
 
     api.addTS3Listeners(Listener(api))
-//    api.registerEvent(TS3EventType.TEXT_CHANNEL, channelId)
-//    api.registerEvent(TS3EventType.SERVER)
     api.registerAllEvents()
 }
 
