@@ -1,8 +1,6 @@
 import com.natpryce.konfig.Configuration
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.statements.InsertStatement
-import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 
@@ -16,30 +14,39 @@ class TsDatabase {
         }
     }
 
-    private fun <T : Table> T.insertOrIgnore(vararg keys: Column<*>, body: T.(InsertStatement<Number>) -> Unit) =
-        InsertOrIgnore<Number>(this, keys = *keys).apply {
-            body(this)
-            execute(TransactionManager.current())
-        }
 
-    class InsertOrIgnore<Key : Any>(
-        table: Table,
-        isIgnore: Boolean = false,
-        private vararg val keys: Column<*>
-    ) : InsertStatement<Key>(table, isIgnore) {
-        override fun prepareSQL(transaction: Transaction): String {
-            val tm = TransactionManager.current()
-            val onConflict = "ON CONFLICT ${keys.joinToString { tm.identity(it) }} DO NOTHING"
-            return "${super.prepareSQL(transaction)} $onConflict"
+    fun registerClientJoined(clientUId: String, clientId: Int, channelId: Int?) {
+        transaction {
+            registerEvent(EventType.ClientJoined, target = database.getUserId(clientUId), clientId=clientId, channelId=channelId)
         }
     }
 
-    fun registerEvent(eventType: EventType, invoker: EntityID<Int>?=null, receiver: EntityID<Int>?=null, channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
-        if (invoker != null || receiver != null){
+    fun registerClientLeft(clientId: Int){
+        transaction {
+            val userId = database.lastUserOfClientId(clientId)
+            registerEvent(EventType.ClientLeft, target = userId, clientId=clientId)
+        }
+    }
+
+    fun registerClientMoved(invokerUId: String, targetClientId: Int, newChannelId: Int){
+        val target = lastUserOfClientId(targetClientId)
+        transaction {
+            database.registerEvent(
+                EventType.ClientMoved,
+                invoker = database.getUserId(invokerUId),
+                target = target,
+                channelId = newChannelId
+            )
+        }
+    }
+
+    fun registerEvent(eventType: EventType, invoker: EntityID<Int>?=null, target: EntityID<Int>?=null,
+                      channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
+        if (invoker != null || target != null){
             RecordedEvents.insert {
                 it[RecordedEvents.clientId] = clientId
                 it[RecordedEvents.channelId] = channelId
-                it[RecordedEvents.targetId] = receiver
+                it[RecordedEvents.targetId] = target
                 it[RecordedEvents.invokerId] = invoker
                 it[RecordedEvents.eventType] = eventType.id
                 it[RecordedEvents.timestamp] = timestamp
@@ -49,7 +56,7 @@ class TsDatabase {
     /**
      * @return the UserId created in the database
      */
-    fun createUser(uniqueUserId: String): EntityID<Int>{
+    private fun createUser(uniqueUserId: String): EntityID<Int>{
         return transaction {
             Users.insertOrIgnore{
                 it[uniqueId] = uniqueUserId
@@ -60,57 +67,70 @@ class TsDatabase {
         }
     }
 
-    fun registerUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int> {
+    fun registerUser(uniqueUserId: String, clientId: Int, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int>? {
         return transaction {
-            addLogger(StdOutSqlLogger)
             val userId = createUser(uniqueUserId)
             val agreed = User[userId].hasAgreed
-            if (!agreed){
-                UserRegistrations.insert() {
-                    it[action] = 0
-                    it[UserRegistrations.timestamp] = timestamp
-                    it[user] =userId
-                }
-                User[userId].hasAgreed = true
+            if (agreed)
+                return@transaction null
+
+            UserRegistrations.insert {
+                it[action] = EventType.UserRegistered.id
+                it[UserRegistrations.timestamp] = timestamp
+                it[user] =userId
             }
+            User[userId].hasAgreed = true
+            database.registerEvent(
+                EventType.UserRegistered,
+                invoker = userId,
+                null,
+                clientId = clientId,
+                timestamp = timestamp
+            )
             userId
         }
     }
 
-    fun unregisterUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int> =
+    fun unregisterUser(uniqueUserId: String, clientId: Int, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int>? =
         transaction {
-            addLogger(StdOutSqlLogger)
             val userId = createUser(uniqueUserId)
             val agreed = User[userId].hasAgreed
+            if (!agreed)
+                return@transaction null
 
-            UserRegistrations.insert() {
-                it[action] = 0
+            UserRegistrations.insert {
+                it[action] = EventType.UserUnregistered.id
                 it[UserRegistrations.timestamp] = timestamp
                 it[user] = userId
             }
             User[userId].hasAgreed = false
+
+            database.registerEvent(
+                EventType.UserUnregistered,
+                invoker=userId,
+                null,
+                clientId = clientId,
+                timestamp = timestamp
+            )
             userId
         }
 
-    fun lastUsedClientId(userId: Int): Int? {
+    fun lastUserOfClientId(userId: Int): EntityID<Int>? {
         return transaction {
-            addLogger(StdOutSqlLogger)
             RecordedEvents.slice(RecordedEvents.invokerId)
                 .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.clientId eq userId) }
                 .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
-                .map { it[RecordedEvents.invokerId] }.firstOrNull()?.value
+                .map { it[RecordedEvents.invokerId] }.firstOrNull()
         }
     }
 
 
-    fun uniqueUserToEntityId(uniqueUserId: String?, agreedCondition: Boolean =true): EntityID<Int>? {
-        return if (uniqueUserId != null && uniqueUserId != "") Users.select{(Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq true)}.
-        map { it[Users.id] }.firstOrNull() else null
-    }
+    fun getUserId(uniqueUserId: String?, hasAgreed:Boolean=true): EntityID<Int>? {
+        if (uniqueUserId == null || uniqueUserId == "")
+            return null
 
-    fun userIdToEntityId(userId: Int?, agreedCondition: Boolean=true): EntityID<Int>? {
-        return if (userId != null) Users.select{(Users.id eq userId) and (Users.hasAgreed eq true)}.
-        map{it[Users.id]}.firstOrNull() else null
+        return transaction {
+            User.find { (Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq hasAgreed) }.firstOrNull()?.id
+        }
     }
-
 }

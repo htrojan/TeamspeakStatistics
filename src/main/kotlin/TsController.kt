@@ -8,7 +8,7 @@ import java.lang.Exception
 class TsController {
     lateinit var api: TS3Api;
 
-    fun connectApi(host: String, user: String, password: String): TS3Api {
+    private fun spawnConnection(host: String, user: String, password: String): TS3Api {
         val tsconfig: TS3Config = TS3Config()
         tsconfig.setHost(host)
         val query: TS3Query = TS3Query(tsconfig)
@@ -22,7 +22,7 @@ class TsController {
     }
 
     fun connect(config: Configuration) {
-        api = connectApi(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
+        api = spawnConnection(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
         val ownId = api.whoAmI().id
         val channel = api.getChannelByNameExact(config[channel_name], false)
         val channelId : Int = channel?.id
