@@ -48,3 +48,12 @@ class RecordedEvent(id: EntityID<Int>) : IntEntity(id) {
     var channelId by RecordedEvents.channelId
     var timestamp by RecordedEvents.timestamp
 }
+
+enum class EventType(val id: Int){
+    ClientJoined(0),
+    ClientLeft(1),
+    ClientMoved(3),
+
+    UserRegistered(0),
+    UserUnregistered(1)
+}
