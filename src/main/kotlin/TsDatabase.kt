@@ -34,14 +34,14 @@ class TsDatabase {
         }
     }
 
-    fun registerEvent(eventType: Int, invoker: EntityID<Int>?=null, receiver: EntityID<Int>?=null, channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
+    fun registerEvent(eventType: EventType, invoker: EntityID<Int>?=null, receiver: EntityID<Int>?=null, channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
         if (invoker != null || receiver != null){
             RecordedEvents.insert {
                 it[RecordedEvents.clientId] = clientId
                 it[RecordedEvents.channelId] = channelId
                 it[RecordedEvents.targetId] = receiver
                 it[RecordedEvents.invokerId] = invoker
-                it[RecordedEvents.eventType] = eventType
+                it[RecordedEvents.eventType] = eventType.id
                 it[RecordedEvents.timestamp] = timestamp
             }
         }

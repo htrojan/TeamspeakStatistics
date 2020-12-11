@@ -81,7 +81,7 @@ class Listener(val api: TS3Api) : TS3Listener {
                 transaction {
                     val id = database.registerUser(e.invokerUniqueId, timestamp=timestamp)
                     if (id != null)
-                        database.registerEvent(1, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
+                        database.registerEvent(EventType.UserRegistered, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
                 }
                 api.sendChannelMessage("Erfolgreich registriert!")
             }catch (e: Exception){
@@ -90,7 +90,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         } else if (message == "!unregister"){
             try {
                 transaction {
-                    database.registerEvent(2, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
+                    database.registerEvent(EventType.UserUnregistered, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
                     database.unregisterUser(e.invokerUniqueId, timestamp=timestamp)
                 }
                 api.sendChannelMessage("Erfolgreich abgemeldet!")
@@ -110,7 +110,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         val clientUnique = e.uniqueClientIdentifier
         val clientId = e.clientId
         val channelId = e.clientTargetId
-        database.registerEvent(1, receiver = database.uniqueUserToEntityId(clientUnique), clientId=clientId, channelId=channelId)
+        database.registerEvent(EventType.ClientJoined, receiver = database.uniqueUserToEntityId(clientUnique), clientId=clientId, channelId=channelId)
 
     }
 
@@ -123,7 +123,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         try{
             val clientId = e.clientId
             val userId = database.lastUsedClientId(clientId)
-            database.registerEvent(2, receiver = database.userIdToEntityId(userId), clientId=clientId)
+            database.registerEvent(EventType.ClientLeft, receiver = database.userIdToEntityId(userId), clientId=clientId)
             println("Event was tried to register")
         }catch (e: Exception){
             println("Client info could not be retrieved")
@@ -154,7 +154,9 @@ class Listener(val api: TS3Api) : TS3Listener {
             val invokerId = e.invokerUniqueId
             val channelId = e.targetChannelId
             println("InvokerUnique = ${invokerId}, ClientUnique = ${clientId}, NewChannelId = ${channelId}")
-            database.registerEvent(3,invoker = database.uniqueUserToEntityId(invokerId), receiver =  database.userIdToEntityId(clientId), channelId=channelId)
+            transaction {
+                database.registerEvent(EventType.ClientMoved,invoker = database.uniqueUserToEntityId(invokerId), receiver =  database.userIdToEntityId(clientId), channelId=channelId)
+            }
         } catch (e: Exception) {
             println(e.message)
         }
