@@ -12,7 +12,6 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.lang.Exception
 import java.time.LocalDateTime
-import java.util.*
 
 val teamspeak_host = Key("teamspeak.host", stringType)
 val teamspeak_user = Key("teamspeak.user", stringType)
@@ -50,7 +49,7 @@ fun main() {
             ConfigurationProperties.fromResource("database_stage.properties") overriding
             ConfigurationProperties.fromResource("query.properties")
 
-    database.initDatabase(config)
+    database.connect(config)
 
     val api = connectApi(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
     val ownId = api.whoAmI().id
@@ -68,20 +67,6 @@ fun main() {
     api.registerAllEvents()
 }
 
-
-
-private fun registerEvent(eventType: Int, invoker: EntityID<Int>?=null, receiver: EntityID<Int>?=null, channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
-    if (invoker != null || receiver != null){
-        RecordedEvents.insert {
-            it[RecordedEvents.clientId] = clientId
-            it[RecordedEvents.channelId] = channelId
-            it[RecordedEvents.targetId] = receiver
-            it[RecordedEvents.invokerId] = invoker
-            it[RecordedEvents.eventType] = eventType
-            it[RecordedEvents.timestamp] = timestamp
-        }
-    }
-}
 class Listener(val api: TS3Api) : TS3Listener {
 
     override fun onTextMessage(e: TextMessageEvent?) {
@@ -96,7 +81,7 @@ class Listener(val api: TS3Api) : TS3Listener {
                 transaction {
                     val id = database.registerUser(e.invokerUniqueId, timestamp=timestamp)
                     if (id != null)
-                        registerEvent(1, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
+                        database.registerEvent(1, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
                 }
                 api.sendChannelMessage("Erfolgreich registriert!")
             }catch (e: Exception){
@@ -105,7 +90,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         } else if (message == "!unregister"){
             try {
                 transaction {
-                    registerEvent(2, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
+                    database.registerEvent(2, invoker=database.uniqueUserToEntityId(e.invokerUniqueId), null, clientId= e.invokerId, timestamp = timestamp)
                     database.unregisterUser(e.invokerUniqueId, timestamp=timestamp)
                 }
                 api.sendChannelMessage("Erfolgreich abgemeldet!")
@@ -125,7 +110,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         val clientUnique = e.uniqueClientIdentifier
         val clientId = e.clientId
         val channelId = e.clientTargetId
-        registerEvent(1, receiver = database.uniqueUserToEntityId(clientUnique), clientId=clientId, channelId=channelId)
+        database.registerEvent(1, receiver = database.uniqueUserToEntityId(clientUnique), clientId=clientId, channelId=channelId)
 
     }
 
@@ -138,7 +123,7 @@ class Listener(val api: TS3Api) : TS3Listener {
         try{
             val clientId = e.clientId
             val userId = database.lastUsedClientId(clientId)
-            registerEvent(2, receiver = database.userIdToEntityId(userId), clientId=clientId)
+            database.registerEvent(2, receiver = database.userIdToEntityId(userId), clientId=clientId)
             println("Event was tried to register")
         }catch (e: Exception){
             println("Client info could not be retrieved")
@@ -169,7 +154,7 @@ class Listener(val api: TS3Api) : TS3Listener {
             val invokerId = e.invokerUniqueId
             val channelId = e.targetChannelId
             println("InvokerUnique = ${invokerId}, ClientUnique = ${clientId}, NewChannelId = ${channelId}")
-            registerEvent(3,invoker = database.uniqueUserToEntityId(invokerId), receiver =  database.userIdToEntityId(clientId), channelId=channelId)
+            database.registerEvent(3,invoker = database.uniqueUserToEntityId(invokerId), receiver =  database.userIdToEntityId(clientId), channelId=channelId)
         } catch (e: Exception) {
             println(e.message)
         }

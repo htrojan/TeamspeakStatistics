@@ -1,5 +1,4 @@
 import com.natpryce.konfig.Configuration
-import com.natpryce.konfig.ConfigurationProperties
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.statements.InsertStatement
@@ -8,7 +7,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 
 class TsDatabase {
-    fun initDatabase(dbconfig: Configuration) {
+    fun connect(dbconfig: Configuration) {
         Database.connect(
             "jdbc:postgresql://${dbconfig[database_host]}:${dbconfig[database_port]}/${dbconfig[database_name]}",
             user = dbconfig[database_user], password = dbconfig[database_password])
@@ -17,7 +16,7 @@ class TsDatabase {
         }
     }
 
-    fun <T : Table> T.insertOrIgnore(vararg keys: Column<*>, body: T.(InsertStatement<Number>) -> Unit) =
+    private fun <T : Table> T.insertOrIgnore(vararg keys: Column<*>, body: T.(InsertStatement<Number>) -> Unit) =
         InsertOrIgnore<Number>(this, keys = *keys).apply {
             body(this)
             execute(TransactionManager.current())
@@ -35,50 +34,64 @@ class TsDatabase {
         }
     }
 
+    fun registerEvent(eventType: Int, invoker: EntityID<Int>?=null, receiver: EntityID<Int>?=null, channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
+        if (invoker != null || receiver != null){
+            RecordedEvents.insert {
+                it[RecordedEvents.clientId] = clientId
+                it[RecordedEvents.channelId] = channelId
+                it[RecordedEvents.targetId] = receiver
+                it[RecordedEvents.invokerId] = invoker
+                it[RecordedEvents.eventType] = eventType
+                it[RecordedEvents.timestamp] = timestamp
+            }
+        }
+    }
     /**
      * @return the UserId created in the database
      */
-    fun getOrCreateUser(uniqueUserId: String){
+    fun createUser(uniqueUserId: String): EntityID<Int>{
         return transaction {
             Users.insertOrIgnore{
                 it[uniqueId] = uniqueUserId
                 it[hasAgreed] = false
             }
+            Users.slice(Users.id).select { Users.uniqueId eq uniqueUserId }
+                .map {it[Users.id]}.first()
         }
     }
 
-    fun registerUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int>? {
+    fun registerUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int> {
         return transaction {
             addLogger(StdOutSqlLogger)
-            getOrCreateUser(uniqueUserId)
-            val userQuery = Users.slice(Users.id).select{(Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq false)}
-            val userId = userQuery.map { it[Users.id] }.firstOrNull()
-            if (userId != null){
+            val userId = createUser(uniqueUserId)
+            val agreed = User[userId].hasAgreed
+            if (!agreed){
                 UserRegistrations.insert() {
                     it[action] = 0
                     it[UserRegistrations.timestamp] = timestamp
                     it[user] =userId
                 }
-                Users.update({Users.id eq userId}) { it[hasAgreed] = true }
+                User[userId].hasAgreed = true
             }
             userId
         }
     }
 
-    fun unregisterUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()) {
+    fun unregisterUser(uniqueUserId: String, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int> =
         transaction {
             addLogger(StdOutSqlLogger)
-            getOrCreateUser(uniqueUserId)
-            val userQuery = Users.slice(Users.id).select{(Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq true)}
+            val userId = createUser(uniqueUserId)
+            val agreed = User[userId].hasAgreed
 
             UserRegistrations.insert() {
                 it[action] = 0
                 it[UserRegistrations.timestamp] = timestamp
-                it[user] = userQuery.map { it[id] }.first()
+                it[user] = userId
             }
-            Users.update({Users.uniqueId eq uniqueUserId }) { it[hasAgreed] = true }
+            User[userId].hasAgreed = false
+            userId
         }
-    }
+
     fun lastUsedClientId(userId: Int): Int? {
         return transaction {
             addLogger(StdOutSqlLogger)
