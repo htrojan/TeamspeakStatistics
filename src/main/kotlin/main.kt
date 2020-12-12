@@ -7,7 +7,7 @@ val controller: TsController = TsController()
 fun main() {
     print("Starting")
     val config = ConfigurationProperties.fromResource("teamspeak.properties") overriding
-            ConfigurationProperties.fromResource("database_stage.properties") overriding
+            ConfigurationProperties.fromResource("database.properties") overriding
             ConfigurationProperties.fromResource("query.properties")
 
 
