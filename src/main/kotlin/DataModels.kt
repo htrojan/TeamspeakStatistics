@@ -53,7 +53,9 @@ enum class EventType(val id: Int){
     ClientJoined(1),
     ClientLeft(2),
     ClientMoved(3),
+}
 
+enum class UserEventType(val id: Int){
     UserRegistered(0),
     UserUnregistered(1)
 }

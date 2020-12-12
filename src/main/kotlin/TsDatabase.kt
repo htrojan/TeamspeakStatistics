@@ -75,13 +75,13 @@ class TsDatabase {
                 return@transaction null
 
             UserRegistrations.insert {
-                it[action] = EventType.UserRegistered.id
+                it[action] = UserEventType.UserRegistered.id
                 it[UserRegistrations.timestamp] = timestamp
                 it[user] =userId
             }
             User[userId].hasAgreed = true
             database.registerEvent(
-                EventType.UserRegistered,
+                EventType.ClientJoined,
                 target = userId,
                 invoker = null,
                 clientId = clientId,
@@ -99,14 +99,14 @@ class TsDatabase {
                 return@transaction null
 
             UserRegistrations.insert {
-                it[action] = EventType.UserUnregistered.id
+                it[action] = UserEventType.UserUnregistered.id
                 it[UserRegistrations.timestamp] = timestamp
                 it[user] = userId
             }
             User[userId].hasAgreed = false
 
             database.registerEvent(
-                EventType.UserUnregistered,
+                EventType.ClientLeft,
                 target= userId,
                 invoker = null,
                 clientId = clientId,
