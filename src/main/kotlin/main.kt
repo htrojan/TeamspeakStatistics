@@ -10,8 +10,17 @@ fun main() {
             ConfigurationProperties.fromResource("database_stage.properties") overriding
             ConfigurationProperties.fromResource("query.properties")
 
+
+    while (true){
+        try {
+            controller.connect(config)
+            break;
+        } catch (e: Exception) {
+            println(e.message)
+        }
+    }
+
     database.connect(config)
-    controller.connect(config)
     controller.spawnListener(Listener(controller.api, database))
 }
 
