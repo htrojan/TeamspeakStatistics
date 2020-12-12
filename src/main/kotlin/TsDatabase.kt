@@ -82,8 +82,8 @@ class TsDatabase {
             User[userId].hasAgreed = true
             database.registerEvent(
                 EventType.UserRegistered,
-                invoker = userId,
-                null,
+                target = userId,
+                invoker = null,
                 clientId = clientId,
                 timestamp = timestamp
             )
@@ -107,8 +107,8 @@ class TsDatabase {
 
             database.registerEvent(
                 EventType.UserUnregistered,
-                invoker=userId,
-                null,
+                target= userId,
+                invoker = null,
                 clientId = clientId,
                 timestamp = timestamp
             )
