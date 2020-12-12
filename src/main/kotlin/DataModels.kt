@@ -50,8 +50,8 @@ class RecordedEvent(id: EntityID<Int>) : IntEntity(id) {
 }
 
 enum class EventType(val id: Int){
-    ClientJoined(0),
-    ClientLeft(1),
+    ClientJoined(1),
+    ClientLeft(2),
     ClientMoved(3),
 
     UserRegistered(0),

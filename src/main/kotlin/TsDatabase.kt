@@ -23,6 +23,7 @@ class TsDatabase {
     fun registerClientLeft(clientId: Int){
         transaction {
             val userId = database.lastUserOfClientId(clientId)
+            println("Client leave event with userId: $userId, clientId: $clientId")
             registerEvent(EventType.ClientLeft, target = userId, clientId=clientId)
         }
     }
@@ -116,10 +117,11 @@ class TsDatabase {
 
     fun lastUserOfClientId(userId: Int): EntityID<Int>? {
         return transaction {
-            RecordedEvents.slice(RecordedEvents.invokerId)
-                .select { (RecordedEvents.eventType eq 1) and (RecordedEvents.clientId eq userId) }
+//            addLogger(StdOutSqlLogger)
+            RecordedEvents.slice(RecordedEvents.targetId)
+                .select { (RecordedEvents.eventType eq EventType.ClientJoined.id) and (RecordedEvents.clientId eq userId) }
                 .orderBy(RecordedEvents.timestamp, SortOrder.DESC).limit(1)
-                .map { it[RecordedEvents.invokerId] }.firstOrNull()
+                .map { it[RecordedEvents.targetId] }.firstOrNull()
         }
     }
 

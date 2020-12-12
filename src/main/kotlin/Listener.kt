@@ -24,6 +24,7 @@ class Listener(val api: TS3Api, val database: TsDatabase) : TS3Listener {
     }
 
     override fun onClientJoin(e: ClientJoinEvent?) {
+        println("Client join")
         if (e == null){
             println("Join event was null")
             return
@@ -32,6 +33,7 @@ class Listener(val api: TS3Api, val database: TsDatabase) : TS3Listener {
     }
 
     override fun onClientLeave(e: ClientLeaveEvent?) {
+        println("Client Leave")
         if (e == null){
             println("Leave event was null")
             return
