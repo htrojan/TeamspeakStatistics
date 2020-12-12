@@ -14,7 +14,6 @@ class TsDatabase {
         }
     }
 
-
     fun registerClientJoined(clientUId: String, clientId: Int, channelId: Int?) {
         transaction {
             registerEvent(EventType.ClientJoined, target = database.getUserId(clientUId), clientId=clientId, channelId=channelId)
