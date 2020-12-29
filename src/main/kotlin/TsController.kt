@@ -2,11 +2,15 @@ import com.github.theholywaffle.teamspeak3.TS3Api
 import com.github.theholywaffle.teamspeak3.TS3Config
 import com.github.theholywaffle.teamspeak3.TS3Query
 import com.github.theholywaffle.teamspeak3.api.ChannelProperty
+import com.github.theholywaffle.teamspeak3.api.event.TS3Listener
 import com.natpryce.konfig.Configuration
 import java.lang.Exception
 
 class TsController {
     lateinit var api: TS3Api;
+    lateinit var configuration: Configuration
+    val apiConnections: MutableList<TS3Api> = mutableListOf()
+
 
     private fun spawnConnection(host: String, user: String, password: String): TS3Api {
         val tsconfig: TS3Config = TS3Config()
@@ -22,7 +26,15 @@ class TsController {
     }
 
     fun connect(config: Configuration) {
+        configuration = config
         api = spawnConnection(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
+        try {
+            println("Setting controller nick")
+            api.setNickname("Das Orakel1234")
+        }catch (e: Exception){
+            println("Controller naming failed!")
+            println(e.message)
+        }
         val ownId = api.whoAmI().id
         val channel = api.getChannelByNameExact(config[channel_name], false)
         val channelId : Int = channel?.id
@@ -36,8 +48,12 @@ class TsController {
         }
     }
 
-    fun spawnListener(listener: Listener) {
-        api.addTS3Listeners(listener)
-        api.registerAllEvents()
+    fun spawnListener(listener: TsListener) {
+        val spawnedApi = spawnConnection(configuration[teamspeak_host], configuration[teamspeak_user], configuration[teamspeak_password])
+        apiConnections.add(spawnedApi)
+        listener.api = spawnedApi
+        listener.init()
+        spawnedApi.addTS3Listeners(listener)
+        spawnedApi.registerAllEvents()
     }
 }
