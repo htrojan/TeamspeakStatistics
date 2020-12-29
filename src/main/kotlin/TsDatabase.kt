@@ -1,10 +1,12 @@
 import com.natpryce.konfig.Configuration
+import mu.KotlinLogging
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 import java.time.ZoneId
 
+private val logger = KotlinLogging.logger {  }
 class TsDatabase {
     val TIMEZONE: ZoneId = ZoneId.of("Europe/Berlin")
 
@@ -26,7 +28,7 @@ class TsDatabase {
     fun registerClientLeft(clientId: Int){
         transaction {
             val userId = database.lastUserOfClientId(clientId)
-            println("Client leave event with userId: $userId, clientId: $clientId")
+            logger.debug("Registering client left event with userId: {}, clientId: {}", userId, clientId)
             registerEvent(EventType.ClientLeft, target = userId, clientId=clientId)
         }
     }
@@ -34,9 +36,12 @@ class TsDatabase {
     fun registerClientMoved(invokerUId: String, targetClientId: Int, newChannelId: Int){
         val target = lastUserOfClientId(targetClientId)
         transaction {
+            val inv = database.getUserId(invokerUId)
+            logger.debug("Registering client moved event with invokerUID: {}, invokerId: {}, target: {}, channelId: {}",
+                invokerUId, inv, target, newChannelId)
             database.registerEvent(
                 EventType.ClientMoved,
-                invoker = database.getUserId(invokerUId),
+                invoker = inv,
                 target = target,
                 channelId = newChannelId
             )
@@ -54,6 +59,9 @@ class TsDatabase {
                 it[RecordedEvents.eventType] = eventType.id
                 it[RecordedEvents.timestamp] = timestamp
             }
+        } else{
+            logger.debug("Event was not recorded: invoker={}, target={}",
+            invoker, target)
         }
     }
     /**
@@ -74,8 +82,10 @@ class TsDatabase {
         return transaction {
             val userId = createUser(uniqueUserId)
             val agreed = User[userId].hasAgreed
-            if (agreed)
+            if (agreed) {
+                logger.debug("User already has agreed to data collection")
                 return@transaction null
+            }
 
             UserRegistrations.insert {
                 it[action] = UserEventType.UserRegistered.id
@@ -83,6 +93,8 @@ class TsDatabase {
                 it[user] =userId
             }
             User[userId].hasAgreed = true
+            logger.debug("Registered user with userId: {}, UID: {}, clientID: {}", userId, uniqueUserId, clientId)
+
             database.registerEvent(
                 EventType.ClientJoined,
                 target = userId,
@@ -98,8 +110,10 @@ class TsDatabase {
         transaction {
             val userId = createUser(uniqueUserId)
             val agreed = User[userId].hasAgreed
-            if (!agreed)
+            if (!agreed) {
+                logger.debug("User already not registered")
                 return@transaction null
+            }
 
             UserRegistrations.insert {
                 it[action] = UserEventType.UserUnregistered.id
@@ -107,6 +121,7 @@ class TsDatabase {
                 it[user] = userId
             }
             User[userId].hasAgreed = false
+            logger.debug("Unregistered user with userId: {}, UID: {}, clientID: {}", userId, uniqueUserId, clientId)
 
             database.registerEvent(
                 EventType.ClientLeft,
@@ -119,6 +134,7 @@ class TsDatabase {
         }
 
     fun lastUserOfClientId(userId: Int): EntityID<Int>? {
+        logger.debug("Querying for last clientId of user {}", userId)
         return transaction {
 //            addLogger(StdOutSqlLogger)
             RecordedEvents.slice(RecordedEvents.targetId)
@@ -139,6 +155,7 @@ class TsDatabase {
     }
 
     fun registerDatabaseMetaEvent(type: MetaEventType){
+        logger.debug("Registering Database MetaEvent {}", type)
         transaction {
             MetaEvents.insert {
                 it[metaEventType] = type.id

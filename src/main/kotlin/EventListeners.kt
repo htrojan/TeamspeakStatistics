@@ -2,9 +2,10 @@ import com.github.theholywaffle.teamspeak3.TS3Api
 import com.github.theholywaffle.teamspeak3.api.ChannelProperty
 import com.github.theholywaffle.teamspeak3.api.event.*
 import com.github.theholywaffle.teamspeak3.api.exception.TS3CommandFailedException
-import org.jetbrains.exposed.sql.transactions.transaction
+import mu.KotlinLogging
 import java.lang.Exception
 
+private val logger = KotlinLogging.logger {  }
 abstract class TsListener(public val database: TsDatabase, val queryName: String, val channelName: String) : TS3Listener{
     lateinit var api: TS3Api
 
@@ -45,6 +46,7 @@ abstract class TsListener(public val database: TsDatabase, val queryName: String
         }
 
         fun init(){
+            logger.debug("Initializing new EventListener")
             val ownId = api.whoAmI().id
             val channel = api.getChannelByNameExact(channelName, false)
             val channelId : Int = channel?.id
@@ -52,39 +54,39 @@ abstract class TsListener(public val database: TsDatabase, val queryName: String
                     ChannelProperty.CHANNEL_ORDER to "0",
                 ))
             try {
+                logger.debug("Moving query to channel {}", channelName)
                 api.moveClient(ownId, channelId)
             }catch (e: Exception){
-                println("Moving of client failed")
+                logger.error("Moving of query failed", e)
             }
             try {
+                logger.debug("Setting name to {}", queryName)
                 api.setNickname(queryName)
             } catch (e: TS3CommandFailedException){
-                println(e.message)
+                logger.error("Setting nickname of query failed", e)
             }
-            println("Query ${queryName} spawned!")
+            logger.info("Initialized new EventListener \"{}\" in channel {}", queryName, channelName)
         }
 }
 class LeaveListener(database: TsDatabase, channelName: String): TsListener(database, "JamesBond", channelName) {
 
-    override fun onClientLeave(e: ClientLeaveEvent?) {
-        println("Client Leave")
-        if (e == null){
-            println("Leave event was null")
+    override fun onClientLeave(event: ClientLeaveEvent?) {
+        if (event == null){
+            logger.error("Leave event was null")
             return
         }
 
         try{
-            database.registerClientLeft(e.clientId)
+            database.registerClientLeft(event.clientId)
         }catch (e: Exception){
-            println(e.message)
+            logger.error("Error while registering onClientLeave event for clientId {}", event.clientId, e)
         }
     }
 }
 class JoinListener(database: TsDatabase, channelName: String) : TsListener(database, "007", channelName) {
     override fun onClientJoin(e: ClientJoinEvent?) {
-        println("Client join")
         if (e == null){
-            println("Join event was null")
+            logger.error("Join event was null")
             return
         }
         database.registerClientJoined(e.uniqueClientIdentifier, e.clientId, e.clientTargetId)
@@ -95,10 +97,11 @@ class TextListener(database: TsDatabase, channelName: String, queryName: String)
 
     override fun onTextMessage(e: TextMessageEvent?) {
         if (e == null){
-            println("Text message event was null")
+            logger.error("Text event was null")
             return
         }
 
+        logger.debug("Client {} sent channel message {}", e.invokerUniqueId, e.message)
         when (e.message){
             "!register" -> {
                 database.registerUser(e.invokerUniqueId, e.invokerId)
@@ -113,13 +116,13 @@ class TextListener(database: TsDatabase, channelName: String, queryName: String)
 
     override fun onClientMoved(e: ClientMovedEvent?) {
         if (e == null){
-            println("ClientMoved event was null")
+            logger.error("Client move event was null")
             return
         }
         try {
             database.registerClientMoved(e.invokerUniqueId, e.clientId, e.targetChannelId)
         } catch (e: Exception) {
-            println(e.message)
+            logger.error("Error while registering onClientMovedEvent")
         }
     }
 }
