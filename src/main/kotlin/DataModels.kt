@@ -49,6 +49,16 @@ class RecordedEvent(id: EntityID<Int>) : IntEntity(id) {
     var timestamp by RecordedEvents.timestamp
 }
 
+object MetaEvents : IntIdTable() {
+    val metaEventType = integer("event_type")
+    val timestamp = datetime("timestamp")
+}
+
+class MetaEvent(id: EntityID<Int>) : IntEntity(id) {
+    var metaEventType by MetaEvents.metaEventType
+    var timestamp by MetaEvents.timestamp
+}
+
 enum class EventType(val id: Int){
     ClientJoined(1),
     ClientLeft(2),
@@ -58,4 +68,9 @@ enum class EventType(val id: Int){
 enum class UserEventType(val id: Int){
     UserRegistered(0),
     UserUnregistered(1)
+}
+
+enum class MetaEventType(val id: Int){
+    ApplicationStarted(0),
+    ApplicationShutdown(1),
 }

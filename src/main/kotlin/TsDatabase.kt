@@ -3,14 +3,17 @@ import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 class TsDatabase {
+    val TIMEZONE: ZoneId = ZoneId.of("Europe/Berlin")
+
     fun connect(dbconfig: Configuration) {
         Database.connect(
             "jdbc:postgresql://${dbconfig[database_host]}:${dbconfig[database_port]}/${dbconfig[database_name]}",
             user = dbconfig[database_user], password = dbconfig[database_password])
         transaction {
-            SchemaUtils.create(Users, UserRegistrations, RecordedEvents)
+            SchemaUtils.create(Users, UserRegistrations, RecordedEvents, MetaEvents)
         }
     }
 
@@ -41,7 +44,7 @@ class TsDatabase {
     }
 
     fun registerEvent(eventType: EventType, invoker: EntityID<Int>?=null, target: EntityID<Int>?=null,
-                      channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now()) {
+                      channelId: Int?=null, clientId: Int?=null, timestamp: LocalDateTime = LocalDateTime.now(TIMEZONE)) {
         if (invoker != null || target != null){
             RecordedEvents.insert {
                 it[RecordedEvents.clientId] = clientId
@@ -67,7 +70,7 @@ class TsDatabase {
         }
     }
 
-    fun registerUser(uniqueUserId: String, clientId: Int, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int>? {
+    fun registerUser(uniqueUserId: String, clientId: Int, timestamp: LocalDateTime = LocalDateTime.now(TIMEZONE)): EntityID<Int>? {
         return transaction {
             val userId = createUser(uniqueUserId)
             val agreed = User[userId].hasAgreed
@@ -91,7 +94,7 @@ class TsDatabase {
         }
     }
 
-    fun unregisterUser(uniqueUserId: String, clientId: Int, timestamp: LocalDateTime = LocalDateTime.now()): EntityID<Int>? =
+    fun unregisterUser(uniqueUserId: String, clientId: Int, timestamp: LocalDateTime = LocalDateTime.now(TIMEZONE)): EntityID<Int>? =
         transaction {
             val userId = createUser(uniqueUserId)
             val agreed = User[userId].hasAgreed
@@ -132,6 +135,15 @@ class TsDatabase {
 
         return transaction {
             User.find { (Users.uniqueId eq uniqueUserId) and (Users.hasAgreed eq hasAgreed) }.firstOrNull()?.id
+        }
+    }
+
+    fun registerDatabaseMetaEvent(type: MetaEventType){
+        transaction {
+            MetaEvents.insert {
+                it[metaEventType] = type.id
+                it[timestamp] = LocalDateTime.now(TIMEZONE)
+            }
         }
     }
 }
