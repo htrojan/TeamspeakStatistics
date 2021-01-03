@@ -32,9 +32,9 @@ jobs:
           java-package: jdk
           architecture: x64
       - name: Running gradle
-        uses: OrangeLabs-moe/gradle-actions@v5.0-openjdk-15
+        uses: eskatos/gradle-command-action@v1
         with:
-          args: shadowJar
+          arguments: shadowJar
         
       # Runs a single command using the runners shell
       - name: Run a one-line script
