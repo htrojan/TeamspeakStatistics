@@ -34,6 +34,7 @@ jobs:
       - name: Running gradle
         uses: eskatos/gradle-command-action@v1
         with:
+          gradle-version: current
           arguments: shadowJar
         
       # Runs a single command using the runners shell
