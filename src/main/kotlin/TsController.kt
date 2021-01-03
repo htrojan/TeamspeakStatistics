@@ -38,7 +38,7 @@ class TsController {
         api = spawnConnection(config[teamspeak_host], config[teamspeak_user], config[teamspeak_password])
         try {
             logger.debug("Setting controller query nickname")
-            api.setNickname("Das Orakel1234")
+            api.setNickname("Das Orakel")
         }catch (e: Exception){
             logger.error("Controller naming failed", e)
         }
